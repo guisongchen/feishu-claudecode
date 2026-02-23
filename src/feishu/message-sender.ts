@@ -61,6 +61,26 @@ export class MessageSender {
     }
   }
 
+  async downloadFile(messageId: string, fileKey: string, savePath: string): Promise<boolean> {
+    try {
+      const resp = await this.client.im.v1.messageResource.get({
+        path: { message_id: messageId, file_key: fileKey },
+        params: { type: 'file' },
+      });
+
+      if (resp) {
+        await (resp as any).writeFile(savePath);
+        this.logger.info({ messageId, fileKey, savePath }, 'File downloaded');
+        return true;
+      }
+      this.logger.error({ messageId, fileKey }, 'Empty response when downloading file');
+      return false;
+    } catch (err) {
+      this.logger.error({ err, messageId, fileKey }, 'Failed to download file');
+      return false;
+    }
+  }
+
   async uploadImage(filePath: string): Promise<string | undefined> {
     try {
       const resp = await this.client.im.v1.image.create({
@@ -99,6 +119,48 @@ export class MessageSender {
     const imageKey = await this.uploadImage(filePath);
     if (!imageKey) return false;
     await this.sendImage(chatId, imageKey);
+    return true;
+  }
+
+  async uploadFile(filePath: string, fileName: string, fileType: string): Promise<string | undefined> {
+    try {
+      const resp = await this.client.im.v1.file.create({
+        data: {
+          file_type: fileType as any,
+          file_name: fileName,
+          file: fs.createReadStream(filePath),
+        },
+      });
+      const fileKey = resp?.file_key;
+      if (fileKey) {
+        this.logger.info({ filePath, fileKey, fileType }, 'File uploaded to Feishu');
+      }
+      return fileKey;
+    } catch (err) {
+      this.logger.error({ err, filePath, fileType }, 'Failed to upload file');
+      return undefined;
+    }
+  }
+
+  async sendFile(chatId: string, fileKey: string): Promise<void> {
+    try {
+      await this.client.im.v1.message.create({
+        params: { receive_id_type: 'chat_id' },
+        data: {
+          receive_id: chatId,
+          content: JSON.stringify({ file_key: fileKey }),
+          msg_type: 'file',
+        },
+      });
+    } catch (err) {
+      this.logger.error({ err, chatId, fileKey }, 'Failed to send file');
+    }
+  }
+
+  async sendLocalFile(chatId: string, filePath: string, fileName: string, fileType: string): Promise<boolean> {
+    const fileKey = await this.uploadFile(filePath, fileName, fileType);
+    if (!fileKey) return false;
+    await this.sendFile(chatId, fileKey);
     return true;
   }
 

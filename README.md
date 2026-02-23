@@ -1,11 +1,10 @@
-# feishu-claudecode
+# MetaBot
+
+[![CI](https://github.com/xvirobotics/metabot/actions/workflows/ci.yml/badge.svg)](https://github.com/xvirobotics/metabot/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![GitHub stars](https://img.shields.io/github/stars/xvirobotics/metabot?style=social)](https://github.com/xvirobotics/metabot)
 
 [English](#english) | [中文](#中文)
-
-<p align="center">
-  <img src="docs/screenshot-help.png" width="45%" />
-  <img src="docs/screenshot-chat.png" width="45%" />
-</p>
 
 ---
 
@@ -13,13 +12,14 @@
 
 ## English
 
-A bridge service connecting Feishu (Lark) Bot to Claude Code CLI. Chat with Claude Code from Feishu on any device (including mobile), with real-time streaming updates via interactive cards.
+MetaBot — A bridge service connecting IM bots (Feishu/Lark) to Claude Code Agent SDK. Chat with Claude Code from Feishu on any device (including mobile), with real-time streaming updates via interactive cards.
 
 ### Features
 
 - **Remote access** - Use Claude Code from any Feishu device, including mobile
 - **Streaming updates** - Real-time execution progress via interactive card updates
-- **Multi-user parallel** - Independent sessions and working directories per chat (each group/DM has its own session)
+- **Multi-bot support** - Run multiple bots in one process, each bound to a different project directory and Feishu app
+- **Multi-user parallel** - Independent sessions per chat (each group/DM has its own session)
 - **Multi-turn conversations** - Automatic context persistence across messages
 - **Image support** - Send images to Claude for analysis; Claude-generated images are sent back
 - **MCP integration** - Automatically loads MCP server configs from Claude Code settings
@@ -35,61 +35,105 @@ A bridge service connecting Feishu (Lark) Bot to Claude Code CLI. Chat with Clau
 
 1. Go to [Feishu Open Platform](https://open.feishu.cn/) and create an enterprise app
 2. Go to **App Capabilities** → Add **Bot**
-3. Go to **Events & Callbacks** → **Event Configuration**:
-   - Select **"Use persistent connection to receive events"** (WebSocket mode, no public IP needed)
-   - Add event: `im.message.receive_v1`
-4. Go to **Permissions** and enable:
+3. Go to **Permissions** and enable:
    - `im:message` - Send and receive messages
    - `im:message:readonly` - Read messages
+   - `im:resource` - Upload images and files (required for sending output files back to chat)
+4. **Start the service first** (`./setup.sh` or `pm2 start ecosystem.config.cjs`), then configure events:
+   - Go to **Events & Callbacks** → **Event Configuration**
+   - Select **"Use persistent connection to receive events"** (WebSocket mode, no public IP needed)
+   - Feishu validates the WebSocket connection on save, so the service must be running
+   - Add event: `im.message.receive_v1`
 5. Publish the app version and get approval
 
-### Installation
+### Quick Start
 
 ```bash
 git clone <your-repo-url>
-cd feishu-claudecode
-npm install
+cd metabot
+./setup.sh
 ```
 
-### Configuration
+The setup script will check prerequisites, install dependencies, prompt for your Feishu app credentials, and start the service with PM2.
+
+### Manual Configuration
 
 ```bash
-cp .env.example .env
+cp bots.example.json bots.json   # edit with your bot configs
+cp .env.example .env              # edit global settings
 ```
 
-Edit `.env`:
+**`bots.json`** — defines one or more bots (see `bots.example.json`):
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `name` | Yes | - | Bot identifier (used in logs) |
+| `feishuAppId` | Yes | - | Feishu App ID |
+| `feishuAppSecret` | Yes | - | Feishu App Secret |
+| `defaultWorkingDirectory` | Yes | - | Fixed working directory for this bot |
+| `authorizedUserIds` | No | (allow all) | Array of user open_ids |
+| `authorizedChatIds` | No | (allow all) | Array of chat_ids |
+| `allowedTools` | No | Read,Edit,Write,Glob,Grep,Bash | Allowed Claude tools |
+| `maxTurns` | No | unlimited | Max conversation turns per query |
+| `maxBudgetUsd` | No | unlimited | Max cost per query (USD) |
+| `model` | No | SDK default | Claude model |
+
+**`.env`** — global settings:
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `FEISHU_APP_ID` | Yes | - | Feishu App ID |
-| `FEISHU_APP_SECRET` | Yes | - | Feishu App Secret |
-| `AUTHORIZED_USER_IDS` | No | (allow all) | Comma-separated user open_ids |
-| `AUTHORIZED_CHAT_IDS` | No | (allow all) | Comma-separated chat_ids |
-| `CLAUDE_DEFAULT_WORKING_DIRECTORY` | No | - | Default working directory |
-| `CLAUDE_ALLOWED_TOOLS` | No | Read,Edit,Write,Glob,Grep,Bash,WebSearch,WebFetch | Allowed tools |
-| `CLAUDE_MAX_TURNS` | No | 50 | Max conversation turns per query |
-| `CLAUDE_MAX_BUDGET_USD` | No | 1.0 | Max cost per query (USD) |
-| `CLAUDE_MODEL` | No | SDK default | Claude model |
+| `BOTS_CONFIG` | No | - | Path to `bots.json`. If unset, falls back to single-bot env vars |
 | `LOG_LEVEL` | No | info | Log level |
+
+<details>
+<summary>Single-bot mode (legacy env var config)</summary>
+
+If `BOTS_CONFIG` is not set, a single bot is configured from env vars:
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `FEISHU_APP_ID` | Yes | Feishu App ID |
+| `FEISHU_APP_SECRET` | Yes | Feishu App Secret |
+| `CLAUDE_DEFAULT_WORKING_DIRECTORY` | Yes | Working directory |
+| `AUTHORIZED_USER_IDS` | No | Comma-separated user open_ids |
+| `CLAUDE_ALLOWED_TOOLS` | No | Comma-separated tools |
+| `CLAUDE_MAX_TURNS` | No | Max turns (unlimited if unset) |
+| `CLAUDE_MAX_BUDGET_USD` | No | Max budget (unlimited if unset) |
+| `CLAUDE_MODEL` | No | Claude model |
+
+</details>
 
 ### Usage
 
 ```bash
-# Development
+# Development (hot reload)
 npm run dev
 
-# Production
-npm run build && npm start
+# Production (PM2 — auto-restart on crash & code changes)
+pm2 start ecosystem.config.cjs
+
+# PM2 common commands
+pm2 status              # View process status
+pm2 logs                # Tail logs in real-time
+pm2 restart all         # Manual restart
+pm2 stop all            # Stop service
+```
+
+To enable auto-start on server reboot:
+
+```bash
+pm2 startup             # Follow the printed sudo command
+pm2 save                # Save current process list
 ```
 
 ### Commands
 
 | Command | Description |
 |---------|-------------|
-| `/cd /path/to/project` | Set working directory (required before first use) |
-| `/reset` | Clear session, start fresh (keeps working directory) |
+| `/reset` | Clear session, start fresh |
 | `/stop` | Abort current running task |
 | `/status` | Show current session info |
+| `/memory` | Memory document commands (list, search, status) |
 | `/help` | Show help message |
 
 ### Image Support
@@ -99,6 +143,25 @@ npm run build && npm start
 **Receive images from Claude:** When Claude generates or writes image files (via Write tool, Bash, or MCP tools), they are automatically uploaded and sent back to Feishu.
 
 Supported formats: PNG, JPEG, GIF, WEBP, BMP, SVG, TIFF (max 10MB per Feishu limit).
+
+### MetaMemory (Shared Knowledge Base)
+
+MetaMemory is a document server for persistent shared memory. Claude autonomously reads/writes documents via the `memory` skill, and humans can browse via a Web UI.
+
+**How it works:**
+- A separate MetaMemory server (FastAPI + SQLite) stores documents as Markdown in a folder tree with full-text search
+- Claude uses the `memory` skill to create/read/update documents via the server API
+- The `/memory` commands provide quick access to folder listings and search results
+- A Web UI at `http://localhost:8100` lets you browse and manage documents
+
+**Commands:**
+```
+/memory list          — Show folder tree
+/memory search query  — Search documents
+/memory status        — Server health check
+```
+
+**Configuration:** Set `MEMORY_SERVER_URL` in `.env` (default: `http://localhost:8100`). Run the MetaMemory server via Docker: see `xvirobotics/metamemory`.
 
 ### MCP Server Configuration
 
@@ -121,7 +184,7 @@ Example config:
 }
 ```
 
-The bot loads MCP servers based on the working directory set via `/cd`. If you already have MCP servers configured for Claude Code CLI, they work automatically.
+The bot loads MCP servers based on the bot's configured working directory. If you already have MCP servers configured for Claude Code CLI, they work automatically.
 
 ### Security Note
 
@@ -132,8 +195,8 @@ This service runs Claude Code in **`bypassPermissions` mode** — Claude can rea
 - Claude has full read/write access to the working directory
 - Claude can execute arbitrary shell commands if `Bash` is in the allowed tools
 - Use `CLAUDE_ALLOWED_TOOLS` to restrict capabilities (e.g. remove `Bash` for read-only use)
-- Use `CLAUDE_MAX_BUDGET_USD` to cap per-request cost
-- Use `AUTHORIZED_USER_IDS` to restrict who can access the bot
+- Use `maxBudgetUsd` in bot config to cap per-request cost
+- Use `authorizedUserIds` in bot config to restrict who can access the bot
 - **Never point the bot at directories containing sensitive data without proper access controls**
 
 ### Architecture
@@ -156,13 +219,14 @@ Feishu User
 
 ## 中文
 
-飞书 Bot 连接 Claude Code 的桥接服务。在飞书（包括手机端）通过聊天远程控制本机的 Claude Code，实时查看执行过程和结果。
+MetaBot — 飞书 Bot 连接 Claude Code 的桥接服务。在飞书（包括手机端）通过聊天远程控制本机的 Claude Code，实时查看执行过程和结果。
 
 ### 功能特性
 
 - **远程访问** - 在飞书任意设备上使用 Claude Code，手机也能写代码
 - **流式更新** - 通过飞书交互卡片实时展示执行进度
-- **多用户并行** - 每个会话（群聊/私聊）独立会话和工作目录，互不干扰
+- **多机器人支持** - 单进程运行多个 Bot，每个 Bot 绑定不同项目目录和飞书应用
+- **多用户并行** - 每个会话（群聊/私聊）独立会话，互不干扰
 - **多轮对话** - 自动维护对话上下文，支持连续交互
 - **图片支持** - 发图片给 Claude 分析；Claude 生成的图片自动回传飞书
 - **MCP 集成** - 自动加载 Claude Code 配置文件中的 MCP 服务器
@@ -193,18 +257,22 @@ Feishu User
 1. 左侧菜单 →「应用能力」→「添加应用能力」
 2. 选择「机器人」，点击添加
 
-#### 1.4 配置事件订阅
-
-1. 左侧菜单 →「事件与回调」→「事件配置」
-2. **订阅方式选择「使用长连接接收事件」**（这样不需要公网 IP，本地即可运行）
-3. 添加事件：搜索并添加 `接收消息 im.message.receive_v1`
-
-#### 1.5 配置权限
+#### 1.4 配置权限
 
 1. 左侧菜单 →「权限管理」
 2. 搜索并开通以下权限：
    - `im:message` - 获取与发送单聊、群组消息
    - `im:message:readonly` - 读取消息（如已有 `im:message` 可跳过）
+   - `im:resource` - 上传图片和文件（用于将 Claude 产出的文件发回聊天）
+
+#### 1.5 配置事件订阅（需要先启动服务）
+
+> **重要**：飞书在保存长连接配置时会验证 WebSocket 连接，因此必须**先启动服务**（第二步），再回来配置此步骤。
+
+1. 左侧菜单 →「事件与回调」→「事件配置」
+2. **订阅方式选择「使用长连接接收事件」**（不需要公网 IP，本地即可运行）
+3. 点击保存 — 飞书会验证 WebSocket 连接
+4. 添加事件：搜索并添加 `接收消息 im.message.receive_v1`
 
 #### 1.6 发布应用
 
@@ -216,55 +284,66 @@ Feishu User
 
 ---
 
-### 第二步：安装项目
+### 第二步：一键部署
 
 ```bash
 git clone <your-repo-url>
-cd feishu-claudecode
-npm install
+cd metabot
+./setup.sh
 ```
+
+脚本会自动检查环境、安装依赖、引导配置飞书凭证，并通过 PM2 启动服务。
+
+如需手动配置，继续看下面的步骤。
 
 ---
 
-### 第三步：配置环境变量
+### 第三步：配置
 
 ```bash
-cp .env.example .env
+cp bots.example.json bots.json   # 编辑 Bot 配置
+cp .env.example .env              # 编辑全局设置
 ```
 
-编辑 `.env` 文件：
+**`bots.json`** — 定义一个或多个 Bot（参考 `bots.example.json`）：
+
+```json
+[
+  {
+    "name": "my-project",
+    "feishuAppId": "cli_xxxxxxxxxx",
+    "feishuAppSecret": "xxxxxxxxxxxxxxxxxx",
+    "defaultWorkingDirectory": "/path/to/your/project",
+    "authorizedUserIds": ["ou_xxxx"],
+    "allowedTools": ["Read", "Edit", "Write", "Glob", "Grep", "Bash", "WebSearch", "WebFetch"]
+  }
+]
+```
+
+| 字段 | 必填 | 默认值 | 说明 |
+|------|------|--------|------|
+| `name` | 是 | - | Bot 标识名（用于日志区分） |
+| `feishuAppId` | 是 | - | 飞书应用 App ID |
+| `feishuAppSecret` | 是 | - | 飞书应用 App Secret |
+| `defaultWorkingDirectory` | 是 | - | 固定工作目录 |
+| `authorizedUserIds` | 否 | 不限制 | 允许使用的用户 open_id 数组 |
+| `authorizedChatIds` | 否 | 不限制 | 允许使用的 chat_id 数组 |
+| `allowedTools` | 否 | Read,Edit,Write,Glob,Grep,Bash | Claude 可用工具 |
+| `maxTurns` | 否 | 不限制 | 每次请求最大对话轮数 |
+| `maxBudgetUsd` | 否 | 不限制 | 每次请求最大花费（美元） |
+| `model` | 否 | SDK 默认 | 指定 Claude 模型 |
+
+**`.env`** — 全局设置：
 
 ```bash
-# ===== 必填 =====
-
-# 飞书应用凭证（第一步获取的）
-FEISHU_APP_ID=cli_xxxxxxxxxx
-FEISHU_APP_SECRET=xxxxxxxxxxxxxxxxxx
-
-# ===== 选填 =====
-
-# 访问控制（逗号分隔，留空表示不限制）
-AUTHORIZED_USER_IDS=
-AUTHORIZED_CHAT_IDS=
-
-# Claude Code 默认工作目录（留空则需要用户先用 /cd 指定）
-CLAUDE_DEFAULT_WORKING_DIRECTORY=
-
-# Claude 可用的工具
-CLAUDE_ALLOWED_TOOLS=Read,Edit,Write,Glob,Grep,Bash,WebSearch,WebFetch
-
-# 每次请求的最大对话轮数
-CLAUDE_MAX_TURNS=50
-
-# 每次请求的最大花费（美元）
-CLAUDE_MAX_BUDGET_USD=1.0
-
-# 指定模型（留空使用 SDK 默认模型）
-CLAUDE_MODEL=
+# 指向 Bot 配置文件
+BOTS_CONFIG=./bots.json
 
 # 日志级别
 LOG_LEVEL=info
 ```
+
+> **多 Bot 模式**：在 `bots.json` 中定义多个条目即可。每个 Bot 绑定不同的飞书应用和项目目录，在单个进程内同时运行。
 
 #### 关于 Claude Code 认证
 
@@ -297,18 +376,39 @@ export ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxx
 npm run dev
 ```
 
-#### 生产模式
+#### 生产模式（PM2）
+
+使用 PM2 进程管理器，支持崩溃自动重启、代码变更自动重启：
 
 ```bash
-npm run build
-npm start
+# 安装 PM2（如未安装）
+npm install -g pm2
+
+# 启动服务
+pm2 start ecosystem.config.cjs
+```
+
+PM2 常用命令：
+
+```bash
+pm2 status              # 查看进程状态
+pm2 logs                # 实时查看日志
+pm2 restart all         # 手动重启
+pm2 stop all            # 停止服务
+```
+
+设置开机自启：
+
+```bash
+pm2 startup             # 按照提示执行打印出的 sudo 命令
+pm2 save                # 保存当前进程列表
 ```
 
 看到类似以下日志表示启动成功：
 
 ```
-[INFO] Starting feishu-claudecode bridge...
-[INFO] feishu-claudecode bridge is running
+[INFO] All bots started — bots: ["metabot"]
+[ws] ws client ready
 ```
 
 ---
@@ -318,26 +418,22 @@ npm start
 #### 基本流程
 
 1. 在飞书中找到你的机器人（私聊或拉入群组）
-2. 发送 `/cd /path/to/your/project` 设置工作目录
-3. 发送任意消息开始和 Claude Code 对话
-4. 卡片会实时更新执行进度，完成后显示最终结果
+2. 直接发送消息开始和 Claude Code 对话（工作目录已在配置中固定）
+3. 卡片会实时更新执行进度，完成后显示最终结果
 
 #### 可用命令
 
 | 命令 | 说明 |
 |------|------|
-| `/cd /path/to/project` | 设置工作目录（首次使用必须先设置） |
-| `/reset` | 清除对话历史，重新开始（保留工作目录设置） |
+| `/reset` | 清除对话历史，重新开始 |
 | `/stop` | 中止当前正在执行的任务 |
-| `/status` | 查看当前会话状态和工作目录 |
+| `/status` | 查看当前会话状态 |
+| `/memory` | 知识文档命令（list、search、status） |
 | `/help` | 显示帮助信息 |
 
 #### 使用示例
 
 ```
-你：/cd /Users/me/my-project
-Bot：✅ Working Directory Set - /Users/me/my-project
-
 你：帮我看看这个项目的结构，有哪些主要模块
 Bot：🔵 Thinking... → 🔵 Running... → 🟢 Complete
     （卡片实时更新，展示 Claude 正在读取哪些文件、分析结果等）
@@ -364,12 +460,12 @@ Bot：✅ Session Reset - 开始新对话
 
 ---
 
-### 多用户说明
+### 多用户 / 多 Bot 说明
 
 - 会话按**聊天**（chat_id）隔离，每个群聊和私聊都有独立的会话
-- 同一用户在不同群组中拥有不同的会话和工作目录
-- 每个聊天可以通过 `/cd` 设置各自的工作目录
+- 每个 Bot 绑定固定的工作目录，不同 Bot 对应不同项目
 - 不同聊天的任务可以同时并行执行
+- 多个 Bot 在单进程中运行，各自独立的飞书 WebSocket 连接
 
 ---
 
@@ -380,6 +476,27 @@ Bot：✅ Session Reset - 开始新对话
 **接收 Claude 生成的图片：** 当 Claude 通过工具（Write、Bash、MCP 等）生成图片文件时，图片会自动上传并发送到飞书聊天中。
 
 支持格式：PNG、JPEG、GIF、WEBP、BMP、SVG、TIFF（单张最大 10MB，飞书限制）。
+
+---
+
+### MetaMemory（共享知识库）
+
+MetaMemory 是一个文档服务器，提供持久化共享记忆。Claude 通过 `memory` skill 自主读写文档，人通过 Web UI 浏览。
+
+**工作原理：**
+- 独立的 MetaMemory 服务器（FastAPI + SQLite）以文件夹树形式存储 Markdown 文档，支持全文搜索
+- Claude 通过 `memory` skill 自动调用服务器 API 创建/读取/更新文档
+- `/memory` 命令提供快速查询文件夹列表和搜索结果
+- Web UI `http://localhost:8100` 支持浏览和管理文档
+
+**命令：**
+```
+/memory list          — 显示文件夹树
+/memory search 关键词  — 搜索文档
+/memory status        — 服务器健康检查
+```
+
+**配置：** 在 `.env` 中设置 `MEMORY_SERVER_URL`（默认 `http://localhost:8100`）。通过 Docker 运行 MetaMemory 服务器：见 `xvirobotics/metamemory`。
 
 ---
 
@@ -404,7 +521,7 @@ MCP 服务器配置直接复用 Claude Code 的标准配置文件，无需额外
 }
 ```
 
-Bot 会根据 `/cd` 设置的工作目录加载对应的 MCP 配置。如果你已经为 Claude Code CLI 配置过 MCP 服务器，它们会自动生效。
+Bot 会根据配置中的工作目录加载对应的 MCP 配置。如果你已经为 Claude Code CLI 配置过 MCP 服务器，它们会自动生效。
 
 ---
 
@@ -432,9 +549,9 @@ Bot 会根据 `/cd` 设置的工作目录加载对应的 MCP 配置。如果你�
 
 - Claude 对工作目录拥有完整的读写权限
 - 如果允许工具列表中包含 `Bash`，Claude 可以执行任意 Shell 命令
-- 通过 `CLAUDE_ALLOWED_TOOLS` 限制可用工具（例如去掉 `Bash` 实现只读模式）
-- 通过 `CLAUDE_MAX_BUDGET_USD` 限制单次请求的最大花费
-- 通过 `AUTHORIZED_USER_IDS` 限制谁可以使用机器人
+- 通过 `allowedTools` 限制可用工具（例如去掉 `Bash` 实现只读模式）
+- 通过 `maxBudgetUsd` 限制单次请求的最大花费
+- 通过 `authorizedUserIds` 限制谁可以使用机器人
 - **不要将机器人指向包含敏感数据的目录，除非已做好访问控制**
 
 ---
@@ -452,7 +569,7 @@ Bot 会根据 `/cd` 设置的工作目录加载对应的 MCP 配置。如果你�
 2. 事件订阅是否选择了「长连接」模式
 3. 是否添加了 `im.message.receive_v1` 事件
 4. 权限 `im:message` 是否已开通
-5. 如果配置了 `AUTHORIZED_USER_IDS`，确认你的 open_id 在列表中
+5. 如果配置了 `authorizedUserIds`，确认你的 open_id 在列表中
 
 **Q: 如何获取用户的 open_id？**
 
@@ -460,10 +577,14 @@ Bot 会根据 `/cd` 设置的工作目录加载对应的 MCP 配置。如果你�
 
 **Q: 如何限制只有特定人可以使用？**
 
-在 `.env` 中设置 `AUTHORIZED_USER_IDS`，多个 ID 用逗号分隔：
+在 `bots.json` 中设置 `authorizedUserIds`：
 
-```bash
-AUTHORIZED_USER_IDS=ou_xxxx1,ou_xxxx2
+```json
+{
+  "name": "my-bot",
+  "authorizedUserIds": ["ou_xxxx1", "ou_xxxx2"],
+  ...
+}
 ```
 
 **Q: Claude 执行超时了怎么办？**
